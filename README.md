@@ -5,6 +5,8 @@
 
 > A prompt navigator and collapsible Markdown outline sidebar for ChatGPT. Works in Edge and Chrome.
 
+[下载最新版](https://github.com/AblazeGHR/webGPTplugin/releases/latest) · [安装（开发者模式）](#安装开发者模式) · [隐私政策](PRIVACY.md)
+
 <img src="docs/screenshots/nav.png" alt="GPTNav：ChatGPT 右侧提问导航与回答大纲" width="900">
 
 ## 为什么用它

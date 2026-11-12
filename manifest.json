@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "GPTNav · ChatGPT 导航轨",
+  "version": "0.2.0",
+  "description": "在 ChatGPT 聊天页右侧提供提问导航轨与当前回答的 Markdown 大纲，可折叠、可跳转。",
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_title": "GPTNav 设置",
+    "default_icon": {
+      "16": "assets/icon16.png",
+      "48": "assets/icon48.png",
+      "128": "assets/icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "src/config.js",
+        "src/i18n.js",
+        "src/css.js",
+        "src/content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

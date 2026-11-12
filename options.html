@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPTNav</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <img class="logo" src="assets/icon48.png" width="46" height="46" alt="">
+      <div class="hero-text">
+        <h1 data-i18n="app.short">GPTNav</h1>
+        <p class="sub" data-i18n="options.subtitle"></p>
+      </div>
+      <span class="version" id="version"></span>
+    </header>
+
+    <section class="card">
+      <label class="field" for="lang">
+        <span data-i18n="options.language"></span>
+        <select id="lang">
+          <option value="auto"></option>
+          <option value="zh">简体中文</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+
+      <label class="field" for="repo">
+        <span data-i18n="options.repo"></span>
+        <input id="repo" type="url" spellcheck="false" autocomplete="off">
+      </label>
+      <p class="hint" id="repoHint" data-i18n="options.repoHint"></p>
+      <p class="saved" id="saved" data-i18n="options.saved" hidden></p>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="options.about"></h2>
+      <p class="body-text" data-i18n="options.aboutText"></p>
+      <p class="privacy" data-i18n="options.privacy"></p>
+      <div class="actions">
+        <button class="btn primary" id="starBtn" type="button">★ <span data-i18n="options.star"></span></button>
+        <a class="btn ghost" id="repoLink" target="_blank" rel="noopener" hidden data-i18n="options.repoLink"></a>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal" id="starModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-icon">★</div>
+      <h2 id="modalTitle" data-i18n="options.modalTitle"></h2>
+      <p data-i18n="options.modalText"></p>
+      <div class="modal-actions">
+        <button class="btn ghost" id="modalLater" type="button" data-i18n="options.modalLater"></button>
+        <button class="btn primary" id="modalGo" type="button" data-i18n="options.modalGo"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="src/config.js"></script>
+  <script src="src/i18n.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

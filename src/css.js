@@ -491,7 +491,7 @@ var GPTNAV_CSS = `
   padding: 4px 6px 4px 4px;
   border-radius: 7px;
   cursor: pointer;
-  color: var(--gn-fg-dim);
+  color: var(--gn-fg);
 }
 .gn-tree-row:hover { background: var(--gn-hover); color: var(--gn-fg); }
 .gn-tree-row.is-active { background: var(--gn-active-bg); color: var(--gn-active); }
@@ -540,7 +540,12 @@ var GPTNAV_CSS = `
   border-left: 1px solid var(--gn-line);
 }
 .gn-tree-node.is-collapsed > .gn-tree-children { display: none; }
-.gn-tree-node.is-ghost .gn-tree-row { opacity: 0.55; }
+.gn-tree-node.is-ghost .gn-tree-row { opacity: 0.85; }
+.gn-tree-node.is-ghost .gn-tree-badge {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--gn-dot);
+  color: var(--gn-fg-dim);
+}
 
 /* ---------- 书签列表 ---------- */
 .gn-bm-head {

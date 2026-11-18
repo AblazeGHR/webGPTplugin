@@ -479,7 +479,7 @@
     else if (!turn.quoted) delete rec.q;
     if (turn.quoteText) rec.qt = turn.quoteText.slice(0, 200);
     else if (!turn.quoted) delete rec.qt;
-    if (typeof turn.order === 'number') rec.i = turn.order;
+    if (typeof turn.order === 'number' && !state.rowsActive) rec.i = turn.order;
     rec.seen = now();
     cache.turns[turn.key] = rec;
     cache.updated = now();
@@ -607,6 +607,142 @@
     return items;
   }
 
+  // ---------------------------------------------------------------- 权威顺序
+  // MAIN world 的 quote-main.js 会把页面虚拟列表的 rows 写到 <html data-gptnav-rows>。
+  // 它包含当前分支的完整轮次和页面自己的全局序号，比“按滚动方向猜”可靠。
+
+  function sameConv(a, b) {
+    if (!a || !b) return true;
+    if (a === b) return true;
+    return a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
+  }
+
+  function readRows() {
+    var raw = '';
+    try { raw = document.documentElement.getAttribute('data-gptnav-rows') || ''; } catch (e) { return null; }
+    if (!raw) return null;
+
+    try {
+      var p = JSON.parse(raw);
+      if (!p || !Array.isArray(p.list) || !p.list.length) return null;
+      var cid = getConvId();
+      if (cid !== 'new' && p.conv && !sameConv(p.conv, cid)) {
+        // 项目/本地会话的 id 可能和 URL 不同：只要当前 DOM 里的 turn 在这份 rows 里，就认它
+        var t = document.querySelector('.thread-scroll-container [data-turn-key]') ||
+          document.querySelector('[data-turn-key]');
+        var k = t ? (t.getAttribute('data-turn-key') || '') : '';
+        var hit = false;
+        if (k) {
+          for (var i = 0; i < p.list.length; i++) {
+            if (p.list[i] && p.list[i].k === k) { hit = true; break; }
+          }
+        }
+        if (!hit) return null;
+      }
+      return p;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function syncOrder(rows, turns, cache) {
+    if (!rows || !cache || !Array.isArray(rows.list) || !rows.list.length) return false;
+    if (!cache.turns) cache.turns = {};
+
+    var list = rows.list;
+    var byIndex = {};
+    var rowKeys = {};
+    var min = 1e9;
+    var max = -1;
+    var i;
+
+    for (i = 0; i < list.length; i++) {
+      var r = list[i];
+      if (!r || !r.k) continue;
+
+      var idx = typeof r.i === 'number' ? r.i : i;
+      var rec = cache.turns[r.k] || (cache.turns[r.k] = {});
+      if (r.t) rec.t = String(r.t).slice(0, 300);
+      if (r.a) rec.a = r.a;
+      if (r.q) rec.q = r.q;
+      if (r.x) rec.qt = String(r.x).slice(0, 200);
+      rec.i = idx;
+      rec.seen = now();
+
+      if (byIndex[idx] === undefined) byIndex[idx] = r.k;
+      rowKeys[r.k] = 1;
+      if (idx < min) min = idx;
+      if (idx > max) max = idx;
+    }
+
+    if (max < 0) return false;
+
+    // 0..最后一条都在 rows 里，说明这份 rows 就是当前分支的全量
+    var full = !!(rows.last && min <= 0);
+
+    var old = Array.isArray(cache.order) ? cache.order : [];
+    var noIndex = [];
+
+    for (i = 0; i < old.length; i++) {
+      var key = old[i];
+      if (!key || rowKeys[key]) continue;
+
+      var cr = cache.turns[key];
+      if (!cr || !cr.t) continue;
+
+      // rows 之外：全量模式下必然是别的分支/旧状态，不再展示
+      if (full) continue;
+
+      if (typeof cr.i !== 'number') { noIndex.push(key); continue; }
+
+      // rows 覆盖的区间里已有权威 key，缓存里不同的 key 属于旧分支
+      if (cr.i >= min && cr.i <= max) continue;
+
+      // 区间外的缓存条目保留，按全局序号归位；同一序号只留较新的
+      if (byIndex[cr.i] !== undefined) {
+        var prev = cache.turns[byIndex[cr.i]];
+        if (prev && (prev.seen || 0) > (cr.seen || 0)) continue;
+      }
+      byIndex[cr.i] = key;
+    }
+
+    // 刚发出、rows 还没来得及收录的轮次：先接在末尾
+    var tail = [];
+    var tailSeen = {};
+    for (i = 0; i < turns.length; i++) {
+      var tk = turns[i].key;
+      if (!tk || rowKeys[tk] || tailSeen[tk]) continue;
+
+      var dup = false;
+      for (var bi in byIndex) {
+        if (byIndex[bi] === tk) { dup = true; break; }
+      }
+      if (dup) continue;
+
+      tailSeen[tk] = 1;
+      tail.push(tk);
+    }
+
+    var indexes = Object.keys(byIndex).map(Number).sort(function (a, b) { return a - b; });
+    var out = [];
+    for (i = 0; i < indexes.length; i++) out.push(byIndex[indexes[i]]);
+
+    out = out.concat(noIndex, tail);
+    cache.order = out;
+    cache.updated = now();
+    state.rowsActive = true;
+    return true;
+  }
+
+  function rowOrdOf(key) {
+    if (!key || !state.rows) return -1;
+    var list = state.rows.list;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].k === key && typeof list[i].i === 'number') return list[i].i;
+    }
+    return -1;
+  }
+
   function clearCurrentCache() {
     if (state.convId && state.convId !== 'new') {
       try { localStorage.removeItem(KEY_CONV + state.convId); } catch (e) { /* ignore */ }
@@ -676,6 +812,8 @@
   var state = {
     convId: '',
     cache: null,
+    rows: null,
+    rowsActive: false,
     folded: new Map(),
     turns: [],
     all: [],
@@ -962,7 +1100,7 @@
     var rec = cache.turns[turn.key] || {};
     rec.t = (turn.userText || '').slice(0, 300);
     rec.a = turn.asstId || turn.key;
-    if (typeof turn.order === 'number') rec.i = turn.order;
+    if (typeof turn.order === 'number' && !state.rowsActive) rec.i = turn.order;
     try {
       var top = absTop(turn.userEl, sc);
       var total = Math.max(1, sc.scrollHeight);
@@ -1554,7 +1692,23 @@
       if (state.all[ai].key === key) targetIdx = ai;
       if (state.all[ai].key === activeKey) activeIdx = ai;
     }
-    if (targetIdx >= 0 && activeIdx >= 0 && targetIdx !== activeIdx) {
+
+    // 优先用页面权威序号（rows / 缓存记录里的全局下标）判断方向；
+    // 面板下标本身可能就是错乱的，不能再拿它当依据。
+    var cacheTurns = state.cache && state.cache.turns ? state.cache.turns : null;
+    var targetOrd = rowOrdOf(key);
+    var activeOrd = rowOrdOf(activeKey);
+    if (targetOrd < 0 && cacheTurns && cacheTurns[key] && typeof cacheTurns[key].i === 'number') {
+      targetOrd = cacheTurns[key].i;
+    }
+    if (activeOrd < 0 && cacheTurns && cacheTurns[activeKey] && typeof cacheTurns[activeKey].i === 'number') {
+      activeOrd = cacheTurns[activeKey].i;
+    }
+
+    if (targetOrd >= 0 && activeOrd >= 0 && targetOrd !== activeOrd) {
+      state.orderHint = targetOrd < activeOrd ? 'before' : 'after';
+      state.orderHintAt = now();
+    } else if (targetIdx >= 0 && activeIdx >= 0 && targetIdx !== activeIdx) {
       state.orderHint = targetIdx < activeIdx ? 'before' : 'after';
       state.orderHintAt = now();
     }
@@ -1573,7 +1727,9 @@
     if (!rec) return;
 
     var dir = '';
-    if (targetIdx >= 0 && activeIdx >= 0 && targetIdx !== activeIdx) {
+    if (targetOrd >= 0 && activeOrd >= 0 && targetOrd !== activeOrd) {
+      dir = targetOrd < activeOrd ? 'before' : 'after';
+    } else if (targetIdx >= 0 && activeIdx >= 0 && targetIdx !== activeIdx) {
       dir = targetIdx < activeIdx ? 'before' : 'after';
     } else if (typeof rec.r === 'number') {
       dir = rec.r * sc.scrollHeight > viewTop(sc) ? 'after' : 'before';
@@ -1729,6 +1885,12 @@
     scheduleRender(40);
   }
   document.addEventListener('gptnav:quote', onQuoteMeta);
+
+  function onRowsMeta() {
+    state.sig = '';
+    scheduleRender(80);
+  }
+  document.addEventListener('gptnav:rows', onRowsMeta);
 
   // ---------------------------------------------------------------- 渲染
 
@@ -2231,6 +2393,9 @@
       state.cache.sid = sid;
     }
 
+    state.rows = readRows();
+    state.rowsActive = false;
+
     var turns = collectTurns(sc);
     var hasContent = turns.length > 0;
     els.root.style.display = hasContent ? '' : 'none';
@@ -2238,7 +2403,8 @@
 
     state.turns = turns;
     if (state.cache) {
-      updateOrder(turns, state.cache);
+      var rowsSynced = state.rows && syncOrder(state.rows, turns, state.cache);
+      if (!rowsSynced) updateOrder(turns, state.cache);
       for (var ti = 0; ti < turns.length; ti++) rememberTurnMeta(turns[ti], state.cache);
     }
     state.all = buildList(turns, state.cache);
@@ -2556,6 +2722,7 @@
       document.removeEventListener('scroll', onDocScrollHide, true);
       document.removeEventListener('pointerdown', onDocPointerDown, true);
       document.removeEventListener('gptnav:quote', onQuoteMeta);
+      document.removeEventListener('gptnav:rows', onRowsMeta);
       try { clearTimeout(state.selTimer); } catch (e) { /* ignore */ }
       try { applyReserve(false); } catch (e) { /* ignore */ }
       try { host.remove(); } catch (e) { /* ignore */ }

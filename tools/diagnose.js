@@ -131,6 +131,18 @@
   var panelIndex = {};
   (panel || []).forEach(function (r) { if (panelIndex[r.key] === undefined) panelIndex[r.key] = r.i; });
 
+  // 插件从页面 React rows 读到的权威顺序
+  var rowsPayload = null;
+  try {
+    rowsPayload = JSON.parse(document.documentElement.getAttribute('data-gptnav-rows') || 'null');
+  } catch (e) {
+    rowsPayload = { parseError: String(e) };
+  }
+  var rowsList = rowsPayload && Array.isArray(rowsPayload.list) ? rowsPayload.list : [];
+  var rowsKeys = rowsList.map(function (r) { return r.k; });
+  var rowsKeySet = {};
+  rowsKeys.forEach(function (k) { rowsKeySet[k] = 1; });
+
   var orderRows = cacheOrder.map(function (k, i) {
     var rec = cacheTurns[k] || {};
     return {
@@ -204,6 +216,11 @@
     cacheOrphanRecords: Object.keys(cacheTurns).filter(function (k) {
       return cacheOrder.indexOf(k) < 0;
     }).length,
+    rowsConv: (rowsPayload && rowsPayload.conv) || '',
+    rowsCount: rowsList.length,
+    rowsLast: !!(rowsPayload && rowsPayload.last),
+    rowsNotInCache: rowsKeys.filter(function (k) { return cacheOrder.indexOf(k) < 0; }),
+    cacheNotInRows: cacheOrder.filter(function (k) { return !rowsKeySet[k]; }).length,
     cacheVsDomInversions: inversions,
     cacheVsDomInversionSamples: invSamples,
     domTurnOrderBreaks: ordBreaks,
@@ -233,6 +250,14 @@
     panelRoot: rootEl ? {
       open: rootEl.getAttribute('data-open'),
       mode: rootEl.getAttribute('data-mode')
+    } : null,
+    rows: rowsPayload ? {
+      conv: rowsPayload.conv || '',
+      last: !!rowsPayload.last,
+      count: rowsList.length,
+      items: rowsList.slice(0, 80).map(function (r) {
+        return { i: r.i, key: r.k, text: (r.t || '').slice(0, 50) };
+      })
     } : null,
     cacheKey: cacheKey,
     cache: cache ? {

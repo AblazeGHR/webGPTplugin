@@ -47,7 +47,8 @@
   }
 
   function getConvId() {
-    var m = location.pathname.match(/\/c\/([^/?#]+)/);
+    // 普通会话 /c/<id>；共享会话 /share/<id> 也用同一套缓存与顺序
+    var m = location.pathname.match(/\/(?:c|share)\/([^/?#]+)/);
     return m ? m[1] : 'new';
   }
 

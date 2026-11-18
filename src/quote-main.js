@@ -129,9 +129,10 @@
         asst = r.turn.messageIds[r.turn.messageIds.length - 1] || '';
       }
 
-      // fallback-turn-N 的 N 是页面自己的全局序号；没有/重复时退回数组下标
+      // 只有 fallback-turn-N / turn-N 才是页面序号；
+      // 共享会话等场景 id 是 UUID，末尾数字没有意义，必须用数组下标。
       var idx = i;
-      var m = String(r.id || '').match(/(\d+)\s*$/);
+      var m = String(r.id || '').trim().match(/^(?:fallback-)?turn-(\d+)$/);
       if (m) {
         var cand = parseInt(m[1], 10);
         if (!usedIdx[cand]) idx = cand;

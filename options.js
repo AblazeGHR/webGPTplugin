@@ -1,11 +1,13 @@
 (function () {
   'use strict';
 
-  var DEFAULTS = { lang: 'auto', repo: '' };
+  var DEFAULTS = { lang: 'auto', repo: '', hideStar: false };
   var detected = gptnavDefaultLang();
-  var state = { lang: 'auto', repo: '' };
+  var state = { lang: 'auto', repo: '', hideStar: false };
   var els = {};
   var savedTimer = 0;
+  var notesData = [];
+  var notesTimer = 0;
 
   function $(id) { return document.getElementById(id); }
 
@@ -93,6 +95,7 @@
     }
 
     updateRepoHint();
+    renderNotes(notesData);
   }
 
   function updateRepoHint() {
@@ -119,8 +122,117 @@
     setTimeout(function () { els.repo.classList.remove('is-attention'); }, 1100);
   }
 
-  function showModal() { els.modal.hidden = false; }
+  function showModal() {
+    if (state.hideStar) return;
+    els.modal.hidden = false;
+  }
   function closeModal() { els.modal.hidden = true; }
+
+  function localArea() {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) return chrome.storage.local;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  function loadNotes() {
+    var s = localArea();
+    if (!s) { renderNotes([]); return; }
+
+    s.get(null, function (all) {
+      var groups = [];
+      Object.keys(all || {}).forEach(function (key) {
+        if (key.indexOf('gptnav:notes:') !== 0) return;
+        var v = all[key];
+        if (v && Array.isArray(v.items) && v.items.length) groups.push(v);
+      });
+      groups.sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); });
+      notesData = groups;
+      renderNotes(groups);
+    });
+  }
+
+  function renderNotes(groups) {
+    if (!els.notesList) return;
+    els.notesList.textContent = '';
+
+    var total = 0;
+    for (var g = 0; g < groups.length; g++) total += groups[g].items.length;
+    els.notesTotal.textContent = total ? t('options.notesCount', { n: total }) : '';
+
+    if (!groups.length) {
+      var empty = document.createElement('div');
+      empty.className = 'notes-empty';
+      empty.textContent = t('options.notesEmpty');
+      els.notesList.appendChild(empty);
+      return;
+    }
+
+    for (var i = 0; i < groups.length; i++) {
+      var group = groups[i];
+      var wrap = document.createElement('div');
+      wrap.className = 'notes-conv';
+
+      var head = document.createElement('div');
+      head.className = 'notes-conv-head';
+
+      var titleText = group.convTitle || t('options.notesUntitled');
+      var title;
+      if (group.convUrl && /^https:\/\//i.test(group.convUrl)) {
+        title = document.createElement('a');
+        title.href = group.convUrl;
+        title.target = '_blank';
+        title.rel = 'noopener';
+      } else {
+        title = document.createElement('span');
+      }
+      title.className = 'notes-conv-title';
+      title.textContent = titleText;
+      title.title = titleText;
+
+      var count = document.createElement('span');
+      count.className = 'notes-conv-count';
+      count.textContent = t('options.notesCount', { n: group.items.length });
+
+      head.appendChild(title);
+      head.appendChild(count);
+      wrap.appendChild(head);
+
+      var items = group.items.slice().sort(function (a, b) {
+        return (a.created || 0) - (b.created || 0);
+      });
+
+      for (var j = 0; j < items.length; j++) {
+        var it = items[j];
+        var row = document.createElement('div');
+        row.className = 'notes-item';
+
+        var dot = document.createElement('span');
+        dot.className = 'notes-dot';
+        row.appendChild(dot);
+
+        var body = document.createElement('div');
+        body.className = 'notes-body';
+
+        var note = document.createElement('div');
+        note.className = 'notes-note';
+        note.textContent = it.note || it.summary || it.text || '';
+        body.appendChild(note);
+
+        if (it.note && (it.summary || it.text)) {
+          var ex = document.createElement('div');
+          ex.className = 'notes-ex';
+          ex.textContent = it.summary || it.text;
+          body.appendChild(ex);
+        }
+
+        row.appendChild(body);
+        wrap.appendChild(row);
+      }
+
+      els.notesList.appendChild(wrap);
+    }
+  }
 
   function init() {
     els = {
@@ -128,23 +240,28 @@
       repo: $('repo'),
       repoHint: $('repoHint'),
       saved: $('saved'),
+      hideStar: $('hideStar'),
       starBtn: $('starBtn'),
       repoLink: $('repoLink'),
       modal: $('starModal'),
       modalGo: $('modalGo'),
       modalLater: $('modalLater'),
-      version: $('version')
+      version: $('version'),
+      notesList: $('notesList'),
+      notesTotal: $('notesTotal')
     };
 
     load(function (s) {
       state.lang = (s && s.lang) || 'auto';
       state.repo = (s && s.repo) || '';
+      state.hideStar = !!(s && s.hideStar);
       els.repo.value = state.repo;
+      els.hideStar.checked = state.hideStar;
       applyI18n();
 
       try { els.version.textContent = 'v' + chrome.runtime.getManifest().version; } catch (e) { /* ignore */ }
 
-      // 按要求：每次打开设置页都弹出
+      loadNotes();
       showModal();
     });
 
@@ -152,6 +269,15 @@
       state.lang = els.lang.value;
       save({ lang: state.lang });
       applyI18n();
+    });
+
+    els.hideStar.addEventListener('change', function () {
+      state.hideStar = !!els.hideStar.checked;
+      save({ hideStar: state.hideStar }, function (ok) {
+        if (ok) showSaved();
+      });
+      if (state.hideStar) closeModal();
+      else showModal();
     });
 
     var repoDebounce = 0;
@@ -186,6 +312,20 @@
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible') showModal();
     });
+
+    try {
+      if (chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener(function (changes, area) {
+          if (area !== 'local') return;
+          var hit = Object.keys(changes).some(function (k) {
+            return k.indexOf('gptnav:notes:') === 0;
+          });
+          if (!hit) return;
+          clearTimeout(notesTimer);
+          notesTimer = setTimeout(loadNotes, 150);
+        });
+      }
+    } catch (e) { /* ignore */ }
   }
 
   if (document.readyState === 'loading') {

@@ -845,6 +845,11 @@
     bookmarks: [],
     bmConfirmUntil: 0,
     pendingBookmark: null,
+    editing: null,
+    mirrorTimer: 0,
+    mirrorSig: '',
+    hlTimer: 0,
+    hasQuotes: false,
     selInfo: null,
     selTimer: 0
   };
@@ -872,7 +877,7 @@
     '        <button class="gn-tab" data-mode="list" role="tab" aria-selected="true" type="button">提问</button>',
     '        <button class="gn-tab" data-mode="outline" role="tab" aria-selected="false" type="button">大纲</button>',
     '        <button class="gn-tab" data-mode="tree" role="tab" aria-selected="false" type="button">树形</button>',
-    '        <button class="gn-tab" data-mode="bookmarks" role="tab" aria-selected="false" type="button">书签</button>',
+    '        <button class="gn-tab" data-mode="bookmarks" role="tab" aria-selected="false" type="button">笔记</button>',
     '      </div>',
     '      <span class="gn-head-spacer"></span>',
     '      <button class="gn-iconbtn gn-collapse" type="button" aria-label="收起导航" title="收起">',
@@ -898,8 +903,20 @@
     '  </section>',
     '  <button class="gn-sel-add" type="button" hidden>',
     '    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M4 2.5h8v11l-4-2.6-4 2.6z"/></svg>',
-    '    <span>书签</span>',
+    '    <span>笔记</span>',
     '  </button>',
+    '  <div class="gn-note-pop" hidden>',
+    '    <div class="gn-note-head">',
+    '      <span class="gn-note-title">笔记</span>',
+    '      <button class="gn-note-close" type="button" aria-label="取消">×</button>',
+    '    </div>',
+    '    <div class="gn-note-ex"></div>',
+    '    <textarea class="gn-note-input" rows="3" maxlength="500"></textarea>',
+    '    <div class="gn-note-actions">',
+    '      <button class="gn-note-cancel" type="button">取消</button>',
+    '      <button class="gn-note-save" type="button">保存</button>',
+    '    </div>',
+    '  </div>',
     '</div>'
   ].join('\n');
 
@@ -937,7 +954,14 @@
     collapse: shadow.querySelector('.gn-collapse'),
     github: shadow.querySelector('.gn-github'),
     settings: shadow.querySelector('.gn-settings'),
-    refresh: shadow.querySelector('.gn-refresh')
+    refresh: shadow.querySelector('.gn-refresh'),
+    notePop: shadow.querySelector('.gn-note-pop'),
+    noteTitle: shadow.querySelector('.gn-note-title'),
+    noteEx: shadow.querySelector('.gn-note-ex'),
+    noteInput: shadow.querySelector('.gn-note-input'),
+    noteSave: shadow.querySelector('.gn-note-save'),
+    noteCancel: shadow.querySelector('.gn-note-cancel'),
+    noteClose: shadow.querySelector('.gn-note-close')
   };
 
   // ---------------------------------------------------------------- 设置 / 语言
@@ -961,6 +985,11 @@
     els.github.title = t('repo');
     els.settings.setAttribute('aria-label', t('settings'));
     els.settings.title = t('settings');
+    if (els.noteInput) els.noteInput.placeholder = t('note.placeholder');
+    if (els.noteSave) els.noteSave.textContent = t('note.save');
+    if (els.noteCancel) els.noteCancel.textContent = t('note.cancel');
+    if (els.noteClose) els.noteClose.setAttribute('aria-label', t('note.cancel'));
+    if (els.noteTitle && !state.editing) els.noteTitle.textContent = t('note.title');
   }
 
   function applySettings(next) {
@@ -1137,6 +1166,7 @@
 
   function setOpen(open) {
     state.open = !!open;
+    if (state.editing) closeNoteEditor();
     persistUI();
     state.sig = '';
     render(true);
@@ -1149,6 +1179,7 @@
     state.activePk = '';
     state.activeTreeKey = '';
     state.bmConfirmUntil = 0;
+    if (state.editing) closeNoteEditor();
     persistUI();
     state.sig = '';
     els.scroll.scrollTop = 0;
@@ -1347,6 +1378,117 @@
       updated: now(),
       items: state.bookmarks.slice(-500)
     });
+    scheduleMirror(300);
+  }
+
+  function noteForTurn(key) {
+    if (!key) return null;
+    for (var i = state.bookmarks.length - 1; i >= 0; i--) {
+      if (state.bookmarks[i] && state.bookmarks[i].turnKey === key) return state.bookmarks[i];
+    }
+    return null;
+  }
+
+  function convTitle() {
+    var title = (document.title || '').trim();
+    title = title.replace(/\s*[-–—|]\s*ChatGPT\s*$/i, '').trim();
+    if (/^ChatGPT$/i.test(title)) return '';
+    return title;
+  }
+
+  // 把当前会话的笔记镜像到 chrome.storage.local，设置页据此汇总全部会话
+  function mirrorNotes() {
+    if (!state.convId || state.convId === 'new') return;
+    try {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+
+      var key = 'gptnav:notes:' + state.convId;
+      if (!state.bookmarks.length) {
+        chrome.storage.local.remove(key);
+        state.mirrorSig = '';
+        return;
+      }
+
+      var items = state.bookmarks.map(function (bm) {
+        return {
+          id: bm.id,
+          note: bm.note || '',
+          text: bm.text || '',
+          summary: bm.summary || '',
+          turnKey: bm.turnKey || '',
+          created: bm.created || 0,
+          updated: bm.updated || bm.created || 0
+        };
+      });
+
+      var payload = {
+        convId: state.convId,
+        convUrl: location.origin + location.pathname,
+        convTitle: convTitle(),
+        updated: now(),
+        items: items
+      };
+
+      var sig = JSON.stringify(items) + '|' + payload.convTitle + '|' + payload.convUrl;
+      if (sig === state.mirrorSig) return;
+      state.mirrorSig = sig;
+
+      var patch = {};
+      patch[key] = payload;
+      chrome.storage.local.set(patch);
+    } catch (e) { /* ignore */ }
+  }
+
+  function scheduleMirror(delay) {
+    if (state.mirrorTimer) return;
+    state.mirrorTimer = setTimeout(function () {
+      state.mirrorTimer = 0;
+      mirrorNotes();
+    }, delay || 1200);
+  }
+
+  // 旧版本的笔记只存在 localStorage；首次运行把它们补进设置页汇总
+  function migrateLegacyNotes() {
+    try {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+      var keys = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(KEY_BOOK) === 0) keys.push(k);
+      }
+
+      keys.forEach(function (key) {
+        var convId = key.slice(KEY_BOOK.length);
+        if (!convId) return;
+        var data = readJSON(key, null);
+        if (!data || !Array.isArray(data.items) || !data.items.length) return;
+
+        var target = 'gptnav:notes:' + convId;
+        chrome.storage.local.get(target, function (cur) {
+          if (cur && cur[target]) return;
+          var items = data.items.map(function (bm) {
+            return {
+              id: bm.id,
+              note: bm.note || '',
+              text: bm.text || '',
+              summary: bm.summary || '',
+              turnKey: bm.turnKey || '',
+              created: bm.created || 0,
+              updated: bm.updated || bm.created || 0
+            };
+          });
+          var patch = {};
+          patch[target] = {
+            convId: convId,
+            convUrl: /^[0-9a-f-]{36}$/i.test(convId) ? 'https://chatgpt.com/c/' + convId : '',
+            convTitle: '',
+            updated: data.updated || 0,
+            items: items
+          };
+          chrome.storage.local.set(patch);
+        });
+      });
+    } catch (e) { /* ignore */ }
   }
 
   function bookmarkIndex(bm) {
@@ -1451,6 +1593,92 @@
     }
     if (sc) return locateInRoot(sc, bm.text);
     return null;
+  }
+
+  // ---------------------------------------------------------------- 正文高亮
+  // 用 CSS Custom Highlight API 标出笔记选中文字和引用来源，不修改 React DOM。
+
+  var HL_NOTE = 'gptnav-note';
+  var HL_QUOTE = 'gptnav-quote';
+  var HL_SHEET = null;
+
+  function ensureHighlightStyles() {
+    if (HL_SHEET) return true;
+    if (!window.CSS || !CSS.highlights || typeof Highlight === 'undefined') return false;
+
+    var css = '::highlight(' + HL_NOTE + '){background-color:rgba(232,184,74,.32);' +
+      'text-decoration:underline 1px rgba(232,184,74,.85);}' +
+      '::highlight(' + HL_QUOTE + '){background-color:rgba(185,163,255,.24);}';
+
+    try {
+      var sheet = new CSSStyleSheet();
+      sheet.replaceSync(css);
+      document.adoptedStyleSheets = document.adoptedStyleSheets.concat(sheet);
+      HL_SHEET = sheet;
+      return true;
+    } catch (e) {
+      try {
+        var style = document.createElement('style');
+        style.id = 'gptnav-highlight-style';
+        style.textContent = css;
+        (document.head || document.documentElement).appendChild(style);
+        HL_SHEET = style;
+        return true;
+      } catch (e2) {
+        return false;
+      }
+    }
+  }
+
+  function setHighlight(name, ranges) {
+    try {
+      if (!ranges.length) {
+        if (CSS.highlights.has(name)) CSS.highlights.delete(name);
+        return;
+      }
+      CSS.highlights.set(name, new Highlight(...ranges));
+    } catch (e) { /* ignore */ }
+  }
+
+  function refreshHighlights() {
+    if (!ensureHighlightStyles()) return;
+    var sc = findScroller();
+
+    var noteRanges = [];
+    for (var i = 0; i < state.bookmarks.length && noteRanges.length < 150; i++) {
+      var bm = state.bookmarks[i];
+      if (!bm || !bm.turnKey || !findTurnByKey(bm.turnKey)) continue;
+      var r = findBookmarkRange(bm, sc);
+      if (r && r.startContainer && r.startContainer.isConnected) noteRanges.push(r);
+    }
+
+    var quoteRanges = [];
+    var byAsst = {};
+    for (var j = 0; j < state.turns.length; j++) {
+      if (state.turns[j].asstId) byAsst[state.turns[j].asstId] = state.turns[j];
+      if (state.turns[j].key) byAsst[state.turns[j].key] = state.turns[j];
+    }
+    for (var k = 0; k < state.turns.length && quoteRanges.length < 150; k++) {
+      var turn = state.turns[k];
+      if (!turn.quoteSourceId || !turn.quoteText) continue;
+      var src = byAsst[turn.quoteSourceId];
+      if (!src) continue;
+      var root = src.asstEl || src.userEl;
+      if (!root) continue;
+      var qr = locateInRoot(root, String(turn.quoteText).slice(0, 300));
+      if (qr && qr.startContainer && qr.startContainer.isConnected) quoteRanges.push(qr);
+    }
+
+    setHighlight(HL_NOTE, noteRanges);
+    setHighlight(HL_QUOTE, quoteRanges);
+  }
+
+  function scheduleHighlights(delay) {
+    if (state.hlTimer) clearTimeout(state.hlTimer);
+    state.hlTimer = setTimeout(function () {
+      state.hlTimer = 0;
+      refreshHighlights();
+    }, delay || 350);
   }
 
   function flashRange(range) {
@@ -1628,17 +1856,18 @@
     state.selInfo = info;
   }
 
-  function addBookmarkFromSelection(info) {
-    if (!info) return;
+  function bookmarkFromSelection(info, noteText) {
     var sc = findScroller();
     var bm = {
       id: 'b' + now().toString(36) + Math.random().toString(36).slice(2, 6),
-      text: info.text.slice(0, 800),
-      summary: info.text.slice(0, 80),
+      text: (info.text || '').slice(0, 800),
+      summary: (info.text || '').slice(0, 120),
+      note: (noteText || '').slice(0, 500),
       turnKey: info.turnKey,
       msgId: info.msgId,
       role: info.role,
       created: now(),
+      updated: now(),
       ratio: 0
     };
 
@@ -1648,21 +1877,118 @@
       bm.ratio = Math.max(0, Math.min(1, top / Math.max(1, sc.scrollHeight)));
     } catch (e) { /* ignore */ }
 
-    state.bookmarks.push(bm);
-    saveBookmarks();
-    if (state.mode === 'bookmarks') render(true);
+    return bm;
+  }
 
-    els.selAdd.querySelector('span').textContent = t('bookmark.saved');
-    els.selAdd.classList.add('is-done');
-    try { window.getSelection().removeAllRanges(); } catch (e) { /* ignore */ }
+  function findSameBookmark(info) {
+    if (!info) return null;
+    var head = (info.text || '').slice(0, 80);
+    for (var i = state.bookmarks.length - 1; i >= 0; i--) {
+      var bm = state.bookmarks[i];
+      if (!bm || bm.turnKey !== info.turnKey) continue;
+      if ((bm.role || '') !== (info.role || '')) continue;
+      if ((bm.text || '').slice(0, 80) !== head) continue;
+      return bm;
+    }
+    return null;
+  }
+
+  function saveNoteFromSelection(info, noteText) {
+    if (!info) return null;
+    var bm = findSameBookmark(info);
+    if (bm) {
+      bm.note = (noteText || '').slice(0, 500);
+      bm.updated = now();
+    } else {
+      bm = bookmarkFromSelection(info, noteText);
+      state.bookmarks.push(bm);
+    }
+    saveBookmarks();
+    scheduleHighlights(120);
+    return bm;
+  }
+
+  function openNoteEditor(opts) {
+    if (!els.notePop) return;
+    var info = opts && opts.info ? opts.info : null;
+    var bm = opts && opts.bm ? opts.bm : null;
+    if (!info && !bm) return;
+
+    state.editing = {
+      info: info ? {
+        text: info.text,
+        turnKey: info.turnKey,
+        msgId: info.msgId,
+        role: info.role,
+        rect: info.rect
+      } : null,
+      bm: bm || null
+    };
+
+    els.noteTitle.textContent = bm ? t('note.editTitle') : t('note.title');
+    els.noteEx.textContent = (bm ? bm.text : info.text) || '';
+    els.noteEx.title = els.noteEx.textContent;
+    els.noteInput.value = bm && bm.note ? bm.note : '';
+    els.noteSave.textContent = t('note.save');
+    els.noteCancel.textContent = t('note.cancel');
+    els.noteClose.setAttribute('aria-label', t('note.cancel'));
+
+    var r = (opts && opts.anchor) || (info && info.rect) || {
+      left: window.innerWidth - 260,
+      top: 100,
+      bottom: 100
+    };
+    var w = 236;
+    var h = 190;
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    if (r.left > window.innerWidth * 0.55) left = Math.max(8, r.left - w - 12);
+    var top = r.bottom + 10;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 10);
+
+    els.notePop.style.left = Math.round(left) + 'px';
+    els.notePop.style.top = Math.round(top) + 'px';
+    els.notePop.hidden = false;
+    els.selAdd.hidden = true;
 
     setTimeout(function () {
-      hideSelButton();
-      els.selAdd.querySelector('span').textContent = t('bookmark.add');
-    }, 900);
+      try {
+        els.noteInput.focus();
+        els.noteInput.select();
+      } catch (e) { /* ignore */ }
+    }, 30);
+  }
+
+  function closeNoteEditor() {
+    if (!els.notePop) return;
+    els.notePop.hidden = true;
+    els.noteInput.value = '';
+    state.editing = null;
+    hideSelButton();
+  }
+
+  function saveNoteEditor() {
+    var ed = state.editing;
+    if (!ed) return;
+
+    var note = (els.noteInput.value || '').trim().slice(0, 500);
+    if (ed.bm) {
+      ed.bm.note = note;
+      ed.bm.updated = now();
+      saveBookmarks();
+      flashToast(t('note.updated'));
+    } else if (ed.info) {
+      saveNoteFromSelection(ed.info, note);
+      flashToast(t('note.saved'));
+    }
+
+    closeNoteEditor();
+    render(true);
+    scheduleHighlights(100);
+    try { window.getSelection().removeAllRanges(); } catch (e) { /* ignore */ }
   }
 
   function deleteBookmark(id) {
+    if (state.editing) closeNoteEditor();
     var out = [];
     for (var i = 0; i < state.bookmarks.length; i++) {
       if (state.bookmarks[i].id !== id) out.push(state.bookmarks[i]);
@@ -1674,6 +2000,7 @@
   }
 
   function clearBookmarks() {
+    if (state.editing) closeNoteEditor();
     state.bookmarks = [];
     state.bmConfirmUntil = 0;
     saveBookmarks();
@@ -1772,6 +2099,18 @@
       return;
     }
 
+    var bmEdit = t.closest ? t.closest('.gn-bm-edit') : null;
+    if (bmEdit) {
+      var eid = bmEdit.getAttribute('data-id');
+      for (var ei = 0; ei < state.bookmarks.length; ei++) {
+        if (state.bookmarks[ei].id === eid) {
+          openNoteEditor({ bm: state.bookmarks[ei], anchor: bmEdit.getBoundingClientRect() });
+          break;
+        }
+      }
+      return;
+    }
+
     var bmDel = t.closest ? t.closest('.gn-bm-del') : null;
     if (bmDel) {
       deleteBookmark(bmDel.getAttribute('data-id'));
@@ -1832,7 +2171,7 @@
     setOpen(true);
   });
 
-  // 选中正文后浮出“书签”按钮
+  // 选中正文后浮出“笔记”按钮，点击打开输入窗
   els.selAdd.addEventListener('pointerdown', function (e) {
     e.preventDefault();
     e.stopPropagation();
@@ -1840,7 +2179,20 @@
   });
   els.selAdd.addEventListener('click', function (e) {
     e.stopPropagation();
-    addBookmarkFromSelection(state.selInfo);
+    if (state.selInfo) openNoteEditor({ info: state.selInfo });
+  });
+
+  els.noteSave.addEventListener('click', saveNoteEditor);
+  els.noteCancel.addEventListener('click', closeNoteEditor);
+  els.noteClose.addEventListener('click', closeNoteEditor);
+  els.noteInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeNoteEditor();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      saveNoteEditor();
+    }
   });
 
   function scheduleSelCheck() {
@@ -1976,6 +2328,7 @@
       li.className = 'gn-tree-node';
       li.setAttribute('data-key', item.key);
       if (item.ghost) li.classList.add('is-ghost');
+      if (noteForTurn(item.key)) li.classList.add('has-note');
       if (folded) li.classList.add('is-collapsed');
 
       var row = document.createElement('div');
@@ -2126,7 +2479,7 @@
     for (var i = 0; i < list.length; i++) {
       var bm = list[i];
       var row = document.createElement('div');
-      row.className = 'gn-bm';
+      row.className = 'gn-bm' + (bm.note ? ' has-note' : '');
       row.setAttribute('data-id', bm.id);
       row.setAttribute('role', 'button');
       row.tabIndex = 0;
@@ -2138,10 +2491,36 @@
       q.className = 'gn-bm-q';
       q.textContent = ix >= 0 ? 'Q' + (ix + 1) : '—';
 
-      var txt = document.createElement('span');
-      txt.className = 'gn-bm-text';
-      txt.textContent = bm.summary || bm.text;
-      txt.title = bm.text;
+      var body = document.createElement('span');
+      body.className = 'gn-bm-body';
+
+      if (bm.note) {
+        var note = document.createElement('span');
+        note.className = 'gn-bm-note';
+        note.textContent = bm.note;
+        note.title = bm.note;
+        body.appendChild(note);
+
+        var ex = document.createElement('span');
+        ex.className = 'gn-bm-ex';
+        ex.textContent = bm.summary || bm.text;
+        ex.title = bm.text || '';
+        body.appendChild(ex);
+      } else {
+        var txt = document.createElement('span');
+        txt.className = 'gn-bm-text';
+        txt.textContent = bm.summary || bm.text;
+        txt.title = bm.text;
+        body.appendChild(txt);
+      }
+
+      var edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'gn-bm-edit';
+      edit.setAttribute('data-id', bm.id);
+      edit.title = t('note.edit');
+      edit.setAttribute('aria-label', t('note.edit'));
+      edit.textContent = '✎';
 
       var del = document.createElement('button');
       del.type = 'button';
@@ -2151,8 +2530,10 @@
       del.setAttribute('aria-label', t('bookmark.delete'));
       del.textContent = '×';
 
+      row.title = (bm.note ? bm.note + '\n\n' : '') + (bm.text || '');
       row.appendChild(q);
-      row.appendChild(txt);
+      row.appendChild(body);
+      row.appendChild(edit);
       row.appendChild(del);
       els.body.appendChild(row);
     }
@@ -2164,11 +2545,15 @@
 
     for (var i = 0; i < state.all.length; i++) {
       var t = state.all[i];
+      var bm = noteForTurn(t.key);
       var b = document.createElement('button');
       b.type = 'button';
-      b.className = 'gn-item' + (t.ghost ? ' is-ghost' : '');
+      b.className = 'gn-item' +
+        (t.ghost ? ' is-ghost' : '') +
+        (bm ? ' has-note' : '') +
+        (t.quoted ? ' is-quoted' : '');
       b.setAttribute('data-key', t.key);
-      b.title = t.userText || '';
+      b.title = bm && bm.note ? (t.userText || '') + '\n\n' + bm.note : (t.userText || '');
 
       var head = document.createElement('div');
       head.className = 'gn-item-head';
@@ -2357,6 +2742,9 @@
       state.activeTreeKey = '';
       state.bmConfirmUntil = 0;
       state.sig = '';
+      state.mirrorSig = '';
+      if (state.editing) closeNoteEditor();
+      scheduleHighlights(80);
 
       var books = loadBookmarks(convId);
       // 新对话变成真实会话时，把临时书签迁过去
@@ -2409,6 +2797,12 @@
       for (var ti = 0; ti < turns.length; ti++) rememberTurnMeta(turns[ti], state.cache);
     }
     state.all = buildList(turns, state.cache);
+    state.hasQuotes = false;
+    for (var qt = 0; qt < turns.length; qt++) {
+      if (turns[qt].quoteSourceId) { state.hasQuotes = true; break; }
+    }
+    if (state.bookmarks.length || state.hasQuotes) scheduleHighlights(280);
+    if (state.bookmarks.length) scheduleMirror(1200);
     maybeJumpPendingBookmark();
 
     var idx = turns.length ? activeTurnIndex(turns, sc) : 0;
@@ -2630,6 +3024,7 @@
     requestAnimationFrame(function () {
       rafPending = false;
       updateActive();
+      if (state.bookmarks.length || state.hasQuotes) scheduleHighlights(500);
     });
   }
   document.addEventListener('scroll', onScroll, { capture: true, passive: true });
@@ -2687,6 +3082,7 @@
   // ---------------------------------------------------------------- 启动
 
   pruneCaches();
+  migrateLegacyNotes();
   applyStaticLabels();
   loadSettings();
 

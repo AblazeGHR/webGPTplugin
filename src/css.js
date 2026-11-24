@@ -246,6 +246,21 @@ var GPTNAV_CSS = `
 .gn-item.is-ghost { opacity: 0.55; }
 .gn-item.is-ghost::before { background: transparent; border: 1px solid var(--gn-dot); }
 
+.gn-item.has-note, .gn-item.is-quoted { padding-right: 18px; }
+.gn-item.has-note::after,
+.gn-item.is-quoted::after {
+  content: "";
+  position: absolute;
+  right: 6px;
+  top: 9px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.gn-item.has-note::after { background: #e8b84a; }
+.gn-item.is-quoted::after { background: var(--gn-active); }
+.gn-item.has-note.is-quoted::after { box-shadow: -8px 0 0 var(--gn-active); }
+
 .gn-item-head {
   display: flex;
   align-items: baseline;
@@ -480,6 +495,92 @@ var GPTNAV_CSS = `
   border-color: color-mix(in srgb, var(--gn-active) 45%, transparent);
 }
 
+/* ---------- 笔记输入窗 ---------- */
+.gn-note-pop {
+  position: fixed;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 236px;
+  padding: 10px;
+  border: 1px solid var(--gn-border);
+  border-radius: 11px;
+  background: var(--gn-bg-solid);
+  box-shadow: var(--gn-shadow);
+  pointer-events: auto;
+}
+.gn-note-pop[hidden] { display: none; }
+.gn-note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gn-note-title { color: var(--gn-fg); font-size: 11.5px; font-weight: 600; }
+.gn-note-close {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--gn-fg-faint);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.gn-note-close:hover { color: var(--gn-fg); }
+.gn-note-ex {
+  color: var(--gn-fg-dim);
+  font-size: 10.5px;
+  line-height: 1.5;
+  max-height: 3.1em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.gn-note-input {
+  width: 100%;
+  min-height: 58px;
+  max-height: 140px;
+  resize: vertical;
+  padding: 7px 8px;
+  border: 1px solid var(--gn-border);
+  border-radius: 7px;
+  background: var(--gn-chip);
+  color: var(--gn-fg);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.5;
+  outline: none;
+}
+.gn-note-input:focus {
+  border-color: color-mix(in srgb, var(--gn-active) 55%, transparent);
+  box-shadow: 0 0 0 2px var(--gn-active-bg);
+}
+.gn-note-input::placeholder { color: var(--gn-fg-faint); }
+.gn-note-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.gn-note-actions button {
+  appearance: none;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--gn-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--gn-fg-dim);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.gn-note-actions button:hover { color: var(--gn-fg); background: var(--gn-hover); }
+.gn-note-save {
+  border-color: transparent !important;
+  background: var(--gn-active-bg) !important;
+  color: var(--gn-active) !important;
+}
+.gn-note-save:hover { filter: brightness(1.15); }
+
 /* ---------- 引用树 ---------- */
 .gn-tree-quote { display: flex; flex-direction: column; gap: 1px; }
 .gn-tree-node { min-width: 0; }
@@ -546,6 +647,15 @@ var GPTNAV_CSS = `
   box-shadow: inset 0 0 0 1px var(--gn-dot);
   color: var(--gn-fg-dim);
 }
+.gn-tree-node.has-note > .gn-tree-row::after {
+  content: "";
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #e8b84a;
+  margin-left: 2px;
+}
 
 /* ---------- 书签列表 ---------- */
 .gn-bm-head {
@@ -591,6 +701,14 @@ var GPTNAV_CSS = `
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+.gn-bm.has-note { box-shadow: inset 2px 0 0 rgba(232, 184, 74, 0.55); }
+.gn-bm-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
 .gn-bm-text {
   flex: 1 1 auto;
   min-width: 0;
@@ -601,6 +719,41 @@ var GPTNAV_CSS = `
   font-size: 11.5px;
   line-height: 1.5;
 }
+.gn-bm-note {
+  color: var(--gn-fg);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.gn-bm-ex {
+  color: var(--gn-fg-dim);
+  font-size: 10.5px;
+  line-height: 1.4;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.gn-bm-edit {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--gn-fg-faint);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.35;
+}
+.gn-bm:hover .gn-bm-edit, .gn-bm-edit:focus { opacity: 1; }
+.gn-bm-edit:hover { color: var(--gn-active); background: var(--gn-hover); }
 .gn-bm-del {
   flex: 0 0 auto;
   display: inline-flex;

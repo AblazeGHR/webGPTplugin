@@ -32,7 +32,20 @@
         <input id="repo" type="url" spellcheck="false" autocomplete="off">
       </label>
       <p class="hint" id="repoHint" data-i18n="options.repoHint"></p>
+      <label class="check" for="hideStar">
+        <input type="checkbox" id="hideStar">
+        <span data-i18n="options.hideStar"></span>
+      </label>
       <p class="saved" id="saved" data-i18n="options.saved" hidden></p>
+    </section>
+
+    <section class="card">
+      <div class="notes-head">
+        <h2 data-i18n="options.notes"></h2>
+        <span class="notes-total" id="notesTotal"></span>
+      </div>
+      <p class="hint" data-i18n="options.notesHint"></p>
+      <div class="notes-list" id="notesList"></div>
     </section>
 
     <section class="card">
